@@ -99,7 +99,7 @@ class RegistryManager:
         try:
             backup = {
                 "timestamp": datetime.now().isoformat(),
-                "version": "1.0",
+                "version": "1.1",
                 "data": self.backup_data
             }
             with open(self.backup_file, 'w', encoding='utf-8') as f:
@@ -267,21 +267,127 @@ class HWIDSpoofer:
     def spoof_disk_serials(self):
         self.log("\n[*] === ПОДМЕНА DISK SERIALS ===")
         
+        spoofed_count = 0
+        
+        disk_models = [
+            "Samsung SSD 980 PRO 1TB",
+            "WD Black SN850X 1TB",
+            "Kingston KC3000 1024GB",
+            "Crucial P5 Plus 1TB",
+            "Seagate FireCuda 530 1TB"
+        ]
+        
         try:
-            result = subprocess.run(
-                ['wmic', 'diskdrive', 'get', 'serialnumber', '/format:list'],
-                capture_output=True, text=True, timeout=10, 
-                creationflags=subprocess.CREATE_NO_WINDOW
-            )
+            base_paths = [
+                r"SYSTEM\CurrentControlSet\Enum\SCSI",
+                r"SYSTEM\CurrentControlSet\Enum\IDE",
+                r"SYSTEM\CurrentControlSet\Enum\NVME"
+            ]
             
-            self.log("[i] Текущие диски обнаружены")
+            for base_path in base_paths:
+                try:
+                    base_key = winreg.OpenKey(winreg.HKEY_LOCAL_MACHINE, base_path, 0, winreg.KEY_READ)
+                    i = 0
+                    while True:
+                        try:
+                            disk_key_name = winreg.EnumKey(base_key, i)
+                            disk_path = f"{base_path}\\{disk_key_name}"
+                            
+                            sub_key = winreg.OpenKey(winreg.HKEY_LOCAL_MACHINE, disk_path, 0, winreg.KEY_READ)
+                            j = 0
+                            while True:
+                                try:
+                                    instance_name = winreg.EnumKey(sub_key, j)
+                                    instance_path = f"{disk_path}\\{instance_name}"
+                                    
+                                    new_serial = ''.join(random.choices(string.ascii_uppercase + string.digits + '_', k=20))
+                                    new_model = random.choice(disk_models)
+                                    
+                                    if self.reg.set_value(instance_path, "SerialNumber", new_serial):
+                                        spoofed_count += 1
+                                    
+                                    device_desc = f"Disk drive - {new_model}"
+                                    self.reg.set_value(instance_path, "DeviceDesc", device_desc)
+                                    self.reg.set_value(instance_path, "FriendlyName", new_model)
+                                    
+                                    device_params_path = f"{instance_path}\\Device Parameters"
+                                    try:
+                                        test_key = winreg.OpenKey(winreg.HKEY_LOCAL_MACHINE, device_params_path, 0, winreg.KEY_READ)
+                                        winreg.CloseKey(test_key)
+                                        self.reg.set_value(device_params_path, "SerialNumber", new_serial)
+                                    except FileNotFoundError:
+                                        pass
+                                    
+                                    j += 1
+                                except OSError:
+                                    break
+                            winreg.CloseKey(sub_key)
+                            i += 1
+                        except OSError:
+                            break
+                    winreg.CloseKey(base_key)
+                except FileNotFoundError:
+                    continue
             
-            new_volume_id = generate_volume_id()
-            self.log(f"[✓] Новый Volume ID: {new_volume_id}")
-            self.spoofed_ids["VolumeId"] = new_volume_id
+            scsi_ports_path = r"HARDWARE\DEVICEMAP\Scsi"
+            try:
+                scsi_key = winreg.OpenKey(winreg.HKEY_LOCAL_MACHINE, scsi_ports_path, 0, winreg.KEY_READ)
+                i = 0
+                while True:
+                    try:
+                        port_name = winreg.EnumKey(scsi_key, i)
+                        port_path = f"{scsi_ports_path}\\{port_name}\\Scsi Bus 0"
+                        
+                        sub_key = winreg.OpenKey(winreg.HKEY_LOCAL_MACHINE, port_path, 0, winreg.KEY_READ)
+                        j = 0
+                        while True:
+                            try:
+                                target_name = winreg.EnumKey(sub_key, j)
+                                target_path = f"{port_path}\\{target_name}"
+                                
+                                new_serial = ''.join(random.choices(string.ascii_uppercase + string.digits, k=20))
+                                new_model = random.choice(disk_models)
+                                
+                                self.reg.set_value(target_path, "SerialNumber", new_serial, hive=winreg.HKEY_LOCAL_MACHINE)
+                                self.reg.set_value(target_path, "Identifier", new_model, hive=winreg.HKEY_LOCAL_MACHINE)
+                                
+                                j += 1
+                            except OSError:
+                                break
+                        winreg.CloseKey(sub_key)
+                        i += 1
+                    except (OSError, FileNotFoundError):
+                        break
+                winreg.CloseKey(scsi_key)
+            except FileNotFoundError:
+                pass
             
-            self.log("[!] Полная подмена дисков требует kernel driver (не реализовано)")
-            return True
+            storage_path = r"SYSTEM\CurrentControlSet\Services\disk\Enum"
+            try:
+                storage_key = winreg.OpenKey(winreg.HKEY_LOCAL_MACHINE, storage_path, 0, winreg.KEY_READ)
+                i = 0
+                while True:
+                    try:
+                        value_name = str(i)
+                        value, _ = winreg.QueryValueEx(storage_key, value_name)
+                        
+                        parts = value.split('\\')
+                        if len(parts) >= 3:
+                            new_serial = generate_hwid(16)
+                            parts[-1] = new_serial
+                            new_value = '\\'.join(parts)
+                            self.reg.set_value(storage_path, value_name, new_value)
+                        
+                        i += 1
+                    except OSError:
+                        break
+                winreg.CloseKey(storage_key)
+            except FileNotFoundError:
+                pass
+            
+            self.log(f"[✓] Подменено дисковых идентификаторов: {spoofed_count}")
+            return spoofed_count > 0
+            
         except Exception as e:
             self.log(f"[!] Ошибка подмены дисков: {e}")
             return False
@@ -379,7 +485,7 @@ class HWIDSpoofer:
     
     def spoof_full(self, options=None):
         self.log("\n" + "=" * 60)
-        self.log("[*] ЗАПУСК ПОЛНОЙ ПОДМЕНЫ HWID v1.0")
+        self.log("[*] ЗАПУСК ПОЛНОЙ ПОДМЕНЫ HWID v1.1")
         self.log("=" * 60)
         
         if options is None:
@@ -388,7 +494,7 @@ class HWIDSpoofer:
                 "hwid_profile": True,
                 "system_info": True,
                 "mac_addresses": True,
-                "disk_serials": False,
+                "disk_serials": True,
                 "smbios": True,
                 "clean_anticheat": True,
                 "clean_traces": True,
@@ -463,7 +569,7 @@ class HWIDSpoofer:
 class HWIDSpooferGUI:
     def __init__(self, root):
         self.root = root
-        self.root.title("NuffSpoofer v1.0 by NuffLya")
+        self.root.title("NuffSpoofer v1.1 by NuffLya")
         self.root.geometry("850x650")
         self.root.resizable(False, False)
         self.root.configure(bg="#1a1a1a")
@@ -487,7 +593,7 @@ class HWIDSpooferGUI:
         
         title = tk.Label(
             header, 
-            text="⚡ NUFFSPOOFER v1.0 ⚡",
+            text="⚡ NUFFSPOOFER v1.1 ⚡",
             font=("Consolas", 22, "bold"),
             fg="#00ff41", bg="#0d0d0d"
         )
@@ -572,15 +678,15 @@ class HWIDSpooferGUI:
         right_col = tk.Frame(options_inner, bg="#1a1a1a")
         right_col.grid(row=0, column=1, sticky=tk.W, padx=10)
         
-        self.opt_disk = tk.BooleanVar(value=False)
+        self.opt_disk = tk.BooleanVar(value=True)
         self.opt_smbios = tk.BooleanVar(value=True)
         self.opt_clean_ac = tk.BooleanVar(value=True)
         self.opt_clean_traces = tk.BooleanVar(value=True)
         
         tk.Checkbutton(
-            right_col, text="Disk Serials (экспериментально)",
+            right_col, text="✓ Disk Serials (модель, серийник)",
             variable=self.opt_disk,
-            font=("Consolas", 9), bg="#1a1a1a", fg="#ffaa00",
+            font=("Consolas", 9), bg="#1a1a1a", fg="#ffffff",
             selectcolor="#0d0d0d", activebackground="#1a1a1a"
         ).pack(anchor=tk.W)
         
@@ -660,7 +766,7 @@ class HWIDSpooferGUI:
         self.status_bar.pack(fill=tk.X, side=tk.BOTTOM)
         
         self.log("=" * 80)
-        self.log("NuffSpoofer v1.0")
+        self.log("NuffSpoofer v1.1")
         self.log("Автор: NuffLya | Права администратора: ✓")
         self.log("=" * 80)
     
