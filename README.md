@@ -1,4 +1,4 @@
-# ⚡ NuffSpoofer v1.0
+# ⚡ NuffSpoofer v1.1
 **Advanced Windows HWID Spoofer with GUI & Automatic Backup**
 
 The most user-friendly and reliable HWID spoofer in 2025.  
@@ -13,6 +13,7 @@ Changes all major hardware identifiers, cleans anti-cheat traces, and automatica
 - Spoofs `HwProfileGuid`
 - Changes `ProductId`, `DigitalProductId`, `InstallDate`
 - Randomizes all network adapter MAC addresses
+- **NEW:** Full disk serial spoofing (model name + serial number for SATA/NVMe/IDE)
 - Spoofs SMBIOS (Motherboard manufacturer, model, BIOS version)
 - Full cleanup of EasyAntiCheat, BattlEye, Riot Vanguard traces
 - Clears Windows activity traces (Recent files, explorer history, etc.)
@@ -62,6 +63,7 @@ Done — your hardware ID is now completely changed.
 ---
 
 ### Changelog
+- **v1.1** — December 29, 2025 — Added full disk serial spoofing (SCSI/IDE/NVMe), universal disk model randomization
 - **v1.0** — December 06, 2025 — Initial release
 
 ---
